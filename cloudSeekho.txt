@@ -1,0 +1,143 @@
+
+- Create pubsub topic:
+gcloud pubsub topics create new-lab-report
+
+- Enable a service
+gcloud services enable run.googleapis.com
+
+- Build the image of service
+gcloud builds submit \
+  --tag gcr.io/$GOOGLE_CLOUD_PROJECT/billing-staging-api:0.2
+
+- Deploy the Service
+gcloud run deploy private-billing-service \
+  --image gcr.io/$GOOGLE_CLOUD_PROJECT/billing-staging-api:0.2 \
+  --platform managed \
+  --region us-central1 \
+  --allow-unauthenticated
+
+gcloud run deploy email-service \
+  --image gcr.io/$GOOGLE_CLOUD_PROJECT/email-service \
+  --platform managed \
+  --region us-central1 \
+  --no-allow-unauthenticated
+
+- Describe a Service
+gcloud run services describe public-billing-service --platform managed
+
+- URL of Running Service
+EMAIL_SERVICE_URL=$(gcloud run services describe email-service --platform managed --region us-central1 --format="value(status.address.url)")
+
+- Clean Up
+
+# Delete the container image for version 1.0.0 of our monolith
+gcloud container images delete gcr.io/${GOOGLE_CLOUD_PROJECT}/monolith:1.0.0 --quiet
+
+# Delete the container image for version 2.0.0 of our monolith
+gcloud container images delete gcr.io/${GOOGLE_CLOUD_PROJECT}/monolith:2.0.0 --quiet
+
+- Create a Service Account
+gcloud iam service-accounts create pubsub-cloud-run-invoker --display-name "PubSub Cloud Run Invoker"
+
+- IAM Policy/Permission Binding of Service Account
+gcloud run services add-iam-policy-binding email-service \
+--member=serviceAccount:pubsub-cloud-run-invoker@$GOOGLE_CLOUD_PROJECT.iam.gserviceaccount.com \ 
+--role=roles/run.invoker \
+--region us-central1 \
+--platform managed
+
+- Subscribe Service to PubSub
+gcloud pubsub subscriptions create email-service-sub 
+--topic new-lab-report 
+--push-endpoint=$EMAIL_SERVICE_URL 
+--push-auth-service-account=pubsub-cloud-run-invoker@$GOOGLE_CLOUD_PROJECT.iam.gserviceaccount.com
+
+- Dockerfile for node.js
+FROM node:10
+WORKDIR /usr/src/app
+COPY package.json package*.json ./
+RUN npm install --only=production
+COPY . .
+CMD [ "npm", "start" ]
+
+
+
+
+Firebase
+
+
+  gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member=user:[EMAIL] --role=roles/logging.viewer
+
+
+
+    gcloud projects add-iam-policy-binding qwiklabs-gcp-02-8c267fdfa53c \
+  --member=user:student-02-1181fdf7ce79@qwiklabs.net --role=roles/source.writer
+
+  
+  firebase deploy
+  firebase init
+
+
+  git config --global user.name "Ahsan"
+git config --global user.email "student-00-f3b999d21fff@qwiklabs.net"
+
+
+- Copy file from directory to Cloud Storage Bucket
+gsutil cp ~/monolith-to-microservices/startup-script.sh gs://fancy-store-$DEVSHELL_PROJECT_ID
+
+- Create Compute Instance
+gcloud compute instances create backend \
+    --machine-type=n1-standard-1 \
+    --tags=backend \
+   --metadata=startup-script-url=https://storage.googleapis.com/fancy-store-$DEVSHELL_PROJECT_ID/startup-script.sh
+
+- Firewall Rules for Compute Engine instances
+gcloud compute firewall-rules create fw-fe \
+    --allow tcp:8080 \
+    --target-tags=frontend
+gcloud compute firewall-rules create fw-be \
+    --allow tcp:8081-8082 \
+    --target-tags=backend
+
+gcloud compute firewall-rules create allow-health-check \
+    --allow tcp:8080-8081 \
+    --source-ranges 130.211.0.0/22,35.191.0.0/16 \
+    --network default
+
+
+- Stop Instances
+gcloud compute instances stop frontend
+
+- Create Instance Template for Instance
+gcloud compute instance-templates create fancy-fe \
+    --source-instance=frontend
+
+- Create Instance groups
+gcloud compute instance-groups managed create fancy-be-mig \
+    --base-instance-name fancy-be \
+    --size 2 \
+    --template fancy-be
+
+- Set named ports for Instance Group ports
+gcloud compute instance-groups set-named-ports fancy-be-mig \
+    --named-ports orders:8081,products:8082
+
+- Create Health Check
+gcloud compute health-checks create http fancy-be-hc \
+    --port 8081 \
+    --request-path=/api/orders \
+    --check-interval 30s \
+    --healthy-threshold 1 \
+    --timeout 10s \
+    --unhealthy-threshold 3
+
+
+Kubernetees:
+
+kubectl create deployment orders --image=gcr.io/${GOOGLE_CLOUD_PROJECT}/orders:1.0.0
+
+kubectl create deployment products --image=gcr.io/${GOOGLE_CLOUD_PROJECT}/products:1.0.0
+
+kubectl expose deployment orders --type=LoadBalancer --port 80 --target-port 8080
+kubectl expose deployment products --type=LoadBalancer --port 80 --target-port 8080
